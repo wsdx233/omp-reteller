@@ -16,6 +16,7 @@ interface Settings {
   enabled: boolean;
   model: string;
   context: boolean;
+  prompt: string;
 }
 
 interface Source {
@@ -46,6 +47,8 @@ const HELP = `/retell — 在原回复下方追加复述版（自动关闭时也
 /retell on | off — 开启或关闭后续回复的自动复述
 /retell model [provider/model] — 指定复述模型；省略时打开选择器
 /retell context on | off — 允许或禁止按需读取历史正文片段
+/retell prompt <提示词> — 设置自定义复述风格
+/retell prompt — 清除自定义提示词，恢复默认
 /retell cancel — 取消正在进行的复述
 /retell status — 查看当前配置
 配置保存在当前会话分支，不切换主 agent 的模型。`;
@@ -55,8 +58,9 @@ export default function reteller(pi: ExtensionAPI) {
   pi.registerFlag("retell-model", { type: "string", description: "复述模型（provider/model 或模型别名）" });
   pi.registerFlag("retell-auto", { type: "boolean", default: false, description: "新会话默认开启自动复述" });
   pi.registerFlag("retell-no-context", { type: "boolean", default: false, description: "新会话禁止复述模型读取上下文" });
+  pi.registerFlag("retell-prompt", { type: "string", description: "新会话的自定义复述风格提示词" });
 
-  let settings: Settings = { enabled: false, model: "", context: true };
+  let settings: Settings = { enabled: false, model: "", context: true, prompt: "" };
   let pending: RetellJob | undefined;
   const attempted = new Set<string>();
 
@@ -78,12 +82,18 @@ export default function reteller(pi: ExtensionAPI) {
       enabled: pi.getFlag("retell-auto") === true,
       model: String(pi.getFlag("retell-model") || ""),
       context: pi.getFlag("retell-no-context") !== true,
+      prompt: String(pi.getFlag("retell-prompt") || "").trim(),
     };
     for (const entry of ctx.sessionManager.getBranch()) {
       if (entry.type !== "custom" || entry.customType !== SETTINGS_TYPE) continue;
       const data = entry.data as Partial<Settings> | undefined;
       if (data && typeof data.enabled === "boolean" && typeof data.model === "string" && typeof data.context === "boolean") {
-        settings = { enabled: data.enabled, model: data.model, context: data.context };
+        settings = {
+          enabled: data.enabled,
+          model: data.model,
+          context: data.context,
+          prompt: typeof data.prompt === "string" ? data.prompt : settings.prompt,
+        };
       }
     }
     if ((ctx.mode === "print" || ctx.mode === "json") && settings.enabled) {
@@ -139,6 +149,7 @@ export default function reteller(pi: ExtensionAPI) {
     }
     const sessionId = ctx.sessionManager.getSessionId();
     const contextEnabled = settings.context;
+    const prompt = settings.prompt;
     let excerpts: ContextExcerpt[] | undefined;
 
     // agent_end is notification-only with a short host timeout. Own this side request
@@ -151,6 +162,7 @@ export default function reteller(pi: ExtensionAPI) {
           model,
           apiKey,
           signal: job.controller.signal,
+          prompt,
           ...(contextEnabled ? {
             context: () => excerpts ??= projectContext(entries.slice(0, source.index).flatMap(entry =>
               entry.type === "message" ? [entry.message] : [])),
@@ -215,9 +227,9 @@ export default function reteller(pi: ExtensionAPI) {
   });
 
   pi.registerCommand("retell", {
-    description: "用独立模型复述最终正文；on/off、model、context、cancel、status",
+    description: "用独立模型复述最终正文；on/off、model、prompt、context、cancel、status",
     getArgumentCompletions: prefix => {
-      const values = ["on", "off", "model", "context on", "context off", "cancel", "status", "help"];
+      const values = ["on", "off", "model", "prompt", "context on", "context off", "cancel", "status", "help"];
       const matches = values.filter(value => value.startsWith(prefix)).map(value => ({ value, label: value }));
       return matches.length ? matches : null;
     },
@@ -227,8 +239,8 @@ export default function reteller(pi: ExtensionAPI) {
         return;
       }
       const input = args.trim();
-      const [command = "", ...rest] = input.split(/\s+/);
-      const value = rest.join(" ");
+      const [command = ""] = input.split(/\s+/, 1);
+      const value = input.slice(command.length).trim();
       switch (command) {
         case "": {
           if (!ctx.isIdle()) {
@@ -249,6 +261,14 @@ export default function reteller(pi: ExtensionAPI) {
           start(ctx, entries, source, true);
           return;
         }
+        case "prompt":
+          cancel();
+          settings.prompt = value;
+          save();
+          ctx.ui.notify(settings.prompt
+            ? "已更新复述提示词；对后续手动和自动复述生效。"
+            : "已恢复默认复述提示词。", "info");
+          return;
         case "model":
           await chooseModel(value, ctx);
           return;
@@ -277,7 +297,7 @@ export default function reteller(pi: ExtensionAPI) {
           save();
           ctx.ui.notify(settings.context
             ? "上下文工具已开启：仅按需发送历史用户正文、助手正文或工具结果片段。"
-            : "上下文工具已关闭：复述模型只接收最终回复正文。", "info");
+            : "上下文工具已关闭：复述模型只接收最终回复正文与编辑提示词。", "info");
           return;
         case "cancel":
           if (value) break;
@@ -286,7 +306,7 @@ export default function reteller(pi: ExtensionAPI) {
           return;
         case "status":
           if (value) break;
-          ctx.ui.notify(`自动复述：${settings.enabled ? "开" : "关"}\n模型：${settings.model || "未选择"}\n上下文工具：${settings.context ? "开（仅按需）" : "关"}\n进行中：${pending ? "是" : "否"}`, "info");
+          ctx.ui.notify(`自动复述：${settings.enabled ? "开" : "关"}\n模型：${settings.model || "未选择"}\n上下文工具：${settings.context ? "开（仅按需）" : "关"}\n复述提示词：${settings.prompt || "默认"}\n进行中：${pending ? "是" : "否"}`, "info");
           return;
         case "help":
           if (value) break;
