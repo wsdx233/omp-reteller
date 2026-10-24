@@ -6,23 +6,23 @@
 
 已在 omp **18.12.6** 验证。运行于交互 TUI 和持续运行的 RPC；单次 `omp --print` / JSON print 模式不运行自动复述。RPC 客户端应继续接收原回复之后的 `message_end` 自定义消息，而不是收到 `agent_end` 就关闭连接。
 
-## 安装与启动
+## 一键安装
 
-本地安装：
-
-```sh
-omp plugin link /home/wsdx233/projects/omp/reteller
-```
-
-然后重新启动 omp。插件通过 `package.json` 的 `omp.extensions` 加载，无需构建；使用 omp 独立二进制时不需要另装 Bun 或运行 `bun install`。
-
-不安装、只临时加载：
+前提：已安装 [omp](https://github.com/can1357/oh-my-pi)，并配置至少一个可用模型。
 
 ```sh
-omp -e /home/wsdx233/projects/omp/reteller
+omp plugin install github:wsdx233/omp-reteller
 ```
 
-在 omp 中先输入 `/retell model` 选择模型，再输入 `/retell` 复述当前已完成的原回复；输入 `/retell on` 开启后续回复的自动复述。模型来自 omp 已配置的模型目录，复用相应的 API key / OAuth 凭据，不另存密钥。也可通过 `/retell model provider/model-id` 直接指定；模型别名会解析并保存为确切的 provider/model。
+默认安装到用户级插件目录，可在不同项目中使用。安装后重新启动 omp；无需手动克隆仓库或构建插件，使用 omp 独立二进制时也无需额外安装 Bun 或执行 `bun install`。
+
+## 快速开始
+
+1. 在 omp 中输入 `/retell model`，选择用于复述的模型，不会切换主 agent 的模型。
+2. 让主 agent 完成一次回复，再输入 `/retell`，在原回复下方查看复述版。
+3. 希望后续回复自动复述时，输入 `/retell on`；用 `/retell off` 关闭后，仍能手动触发。
+
+模型来自 omp 已配置的模型目录，复用相应的 API key / OAuth 凭据，不另存密钥。也可通过 `/retell model provider/model-id` 直接指定；模型别名会解析并保存为确切的 provider/model。
 
 ## 命令
 
@@ -45,7 +45,7 @@ omp -e /home/wsdx233/projects/omp/reteller
 配置保存在**当前会话分支**的自定义状态条目中，恢复会话、分支或树导航时恢复对应配置；新会话不继承上一会话的设置。也可以指定新会话的启动默认值：
 
 ```sh
-omp -e /home/wsdx233/projects/omp/reteller \
+omp \
   --retell-model 'provider/model-id' \
   --retell-prompt '先给结论，用简短段落解释，避免生硬的报告口吻。' \
   --retell-auto \
@@ -92,9 +92,13 @@ omp -e /home/wsdx233/projects/omp/reteller \
 ## 开发与验证
 
 ```sh
+git clone https://github.com/wsdx233/omp-reteller.git
+cd omp-reteller
 bun install --ignore-scripts
 bun run check
 bun test
 ```
 
-回归用例使用本机 HTTP SSE 提供器覆盖初始请求隔离、上下文投影、按需读取、禁用读取、调用预算、未知工具拒绝、空/截断回复和取消。已通过 TypeScript 检查与 9 项回归测试；实际 omp 18.12.6 的 RPC/TUI 验证了手动/自动追加、取消、主模型请求排除复述内容及显示顺序。自定义提示词另外验证了命令设置、无参及空白参数重置、运行中修改、会话恢复和重启、启动默认值及主模型隔离。新默认提示词通过真实 `oc/gpt-6.1-sol` 验证：保留样例中的超时数值、测试数量、线上未验证状态及下一步，删除重复防御性表述；上下文工具可用但读取为 0。发布包仅含 5 个文件，在没有开发依赖的临时目录也已成功加载并执行命令。
+在仓库根目录，可用 `omp plugin link .` 链接本地源码，或用 `omp -e .` 仅在本次运行中加载。
+
+回归测试使用本机 HTTP SSE 提供器，覆盖请求隔离、按需上下文读取、读取禁用、调用预算、未知工具拒绝、空/截断回复和取消。另已用真实 omp 的 RPC/TUI 与模型验证手动/自动复述、配置恢复及去冗余效果；GitHub 安装命令已在隔离的用户目录实测，安装后无需 `-e` 即可自动发现并执行 `/retell status`。
