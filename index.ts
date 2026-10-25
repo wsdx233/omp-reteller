@@ -48,6 +48,7 @@ const HELP = `/retell — 在原回复下方追加复述版（自动关闭时也
 /retell model [provider/model] — 指定复述模型；省略时打开选择器
 /retell context on | off — 允许或禁止按需读取历史正文片段
 /retell prompt <提示词> — 设置自定义复述风格
+/retell prompt add <要求> — 保留已有自定义提示词并继续追加
 /retell prompt — 清除自定义提示词，恢复默认
 /retell cancel — 取消正在进行的复述
 /retell status — 查看当前配置
@@ -229,7 +230,7 @@ export default function reteller(pi: ExtensionAPI) {
   pi.registerCommand("retell", {
     description: "用独立模型复述最终正文；on/off、model、prompt、context、cancel、status",
     getArgumentCompletions: prefix => {
-      const values = ["on", "off", "model", "prompt", "context on", "context off", "cancel", "status", "help"];
+      const values = ["on", "off", "model", "prompt", "prompt add", "context on", "context off", "cancel", "status", "help"];
       const matches = values.filter(value => value.startsWith(prefix)).map(value => ({ value, label: value }));
       return matches.length ? matches : null;
     },
@@ -261,14 +262,21 @@ export default function reteller(pi: ExtensionAPI) {
           start(ctx, entries, source, true);
           return;
         }
-        case "prompt":
+        case "prompt": {
+          const append = /^add(?:\s|$)/.test(value);
+          const prompt = append ? value.slice(3).trim() : value;
+          if (append && !prompt) {
+            ctx.ui.notify("用法：/retell prompt add <附加要求>；清除全部自定义要求请用 /retell prompt。", "warning");
+            return;
+          }
           cancel();
-          settings.prompt = value;
+          settings.prompt = append && settings.prompt ? `${settings.prompt}\n\n${prompt}` : prompt;
           save();
           ctx.ui.notify(settings.prompt
-            ? "已更新复述提示词；对后续手动和自动复述生效。"
+            ? `已${append ? "附加" : "更新"}复述提示词；对后续手动和自动复述生效。`
             : "已恢复默认复述提示词。", "info");
           return;
+        }
         case "model":
           await chooseModel(value, ctx);
           return;
